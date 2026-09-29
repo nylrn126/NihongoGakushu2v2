@@ -61,6 +61,9 @@ def token_secret() -> str:
 def public_user(user: dict[str, Any]) -> dict[str, Any]:
     return {"id": str(user["id"]), "email": user["email"], "name": user.get("name", ""), "role": user.get("role", "learner"), "must_change_password": user.get("must_change_password", False)}
 
+def public_attempt(attempt: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in attempt.items() if key not in {"_id", "user_id", "answers"}}
+
 def make_token(user_id: str, token_type: str, expiry: timedelta, jti: Optional[str] = None) -> str:
     return jwt.encode({"sub": user_id, "type": token_type, "jti": jti or str(uuid.uuid4()), "exp": datetime.now(timezone.utc) + expiry}, token_secret(), algorithm=JWT_ALGORITHM)
 
@@ -214,9 +217,9 @@ async def submit_quiz(lesson_id: str, data: QuizSubmission, user: dict = Depends
     except Exception:
         existing = await db.attempts.find_one({"user_id": user["id"], "operation_id": data.operation_id}, {"_id": 0, "user_id": 0, "answers": 0})
         if existing:
-            return existing
-        return {k: v for k, v in attempt.items() if k != "user_id"}
-    return {k: v for k, v in attempt.items() if k != "user_id"}
+            return public_attempt(existing)
+        return public_attempt(attempt)
+    return public_attempt(attempt)
 
 app.include_router(api)
 allowed_origins = [o for o in os.environ.get("FRONTEND_URL", "").split(",") if o]

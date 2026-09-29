@@ -1,0 +1,26 @@
+{
+  "summary": "Regression testing completed for public lessons, auth sessions, admin login, reset flow, quiz replay, responsive UI, and PWA assets.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/lessons/lesson-01/quiz", "issue": "Submitting a repeated operation_id can still return 500 with FastAPI ObjectId serialization error; a subsequent retry returns 200, so the required first/repeat JSON-safe deterministic response is not met.", "priority": "HIGH"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Quiz submission", "issue": "The live quiz request hit the backend 500 and no quiz result was rendered. Error selector exists in code but authenticated error visibility should be retested after backend fix.", "affected_selectors": ["[data-testid=submit-quiz-button]", "[data-testid=quiz-error]", "[data-testid=quiz-result]"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_gakushu_api.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": ["Fix duplicate quiz handling so every first and repeated operation_id response excludes MongoDB _id and returns the same JSON payload; rerun backend and authenticated UI quiz tests."],
+  "critical_code_review_comments": ["The broad duplicate insert exception path still permits an ObjectId-containing Mongo document to reach FastAPI serialization in some replay scenarios; use an explicit duplicate-key path and normalize/projection the returned attempt."],
+  "updated_files": ["/app/test_reports/iteration_2.json", "/app/test_reports/pytest/pytest_results.xml"],
+  "success_rate": {"backend": "50%", "frontend": "90%"},
+  "seed_data_creation": "Created temporary uniquely named learner accounts for registration and forgot-password testing; no seeded data modified.",
+  "retest_needed": true,
+  "should_call_test_agent_after_fix": true,
+  "context_for_next_testing_agent": "Admin login, HttpOnly session behavior, refresh rotation, logout, public lessons/detail, progress, reset/change-password, mobile layout, manifest, and service-worker controller passed. Existing backend regression has 1 pass and 1 fail due quiz replay serialization.",
+  "rca of the issue": "Replay requests reach the duplicate-attempt exception path. The live backend logs show FastAPI jsonable_encoder failing on bson ObjectId; the returned existing attempt is not consistently normalized before response."
+}
