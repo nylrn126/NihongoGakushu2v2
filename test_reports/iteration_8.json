@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 8 backend testing: All 37 tests pass (27 regression + 10 new iteration 8 tests). Verified susun tokens shape, susun grading with mixed correct/wrong answers, SM-2 spaced repetition progression + quality=0 reset, due-cards endpoint + auth gating, jukugo LLM padding for chapter 2 (admin-only), bunpo answer no-leak, and /api/chapters BabPicker regression (49 chapters with required fields).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration8.py",
+    "/app/backend/tests/test_gakushu_api.py",
+    "/app/backend/tests/test_library_and_padjobs.py",
+    "/app/test_reports/pytest/pytest_iter8.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now ~1040 lines — approaching the 700-line guidance threshold. Consider splitting into routers (auth, chapters, admin, library, sr) as the file continues to grow.",
+    "jukugo pad endpoint silently swallows LLM exceptions (except Exception: continue) which is intentional per spec, but no error count is returned in the response — consider adding a 'failed' count for observability.",
+    "_sm2_update: when reps>=3 and prev interval==0 (edge case if data was mutated), `round(0 * ease) or 1` gracefully returns 1 — good. Formula matches SM-2 correctly.",
+    "/api/library/due-cards silently drops cards whose source content no longer resolves (chapter unpublished / kanji removed). Consider surfacing this in a 'missing' count so learners don't have stale review debt hidden.",
+    "card_reviews collection uses composite unique index (user_id, card_id) — correct. Missing TTL: old reviews accumulate forever."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration8.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "not tested (backend-only per request)"},
+  "test_credentials": "Admin: mpdigitech.id@gmail.com / Admin@2026",
+  "seed_data_creation": "Test learner accounts registered per test module (TEST_iter8_* prefix). One SM-2 card_review record created for card_id='kanji|26|遅' on the iter8 learner. Chapter 2 kanji jukugo were extended via LLM (persistent side effect).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 8 tests live in /app/backend/tests/test_iteration8.py (10 tests). All 37 backend tests pass. pytest.ini pins -n 2 --dist loadscope; run with REACT_APP_BACKEND_URL env var exported. Chapter 2 jukugo lists are now padded (LLM side effect from test_pad_jukugo_chapter_2) — the endpoint is idempotent (skips kanji already at >=4 examples). For SM-2, the review test leaves a card in the iter8 learner's card_reviews collection; each new test-run creates a fresh learner so no cross-run pollution.",
+  "rca of the issue": "No issues found."
+}

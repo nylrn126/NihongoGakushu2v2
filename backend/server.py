@@ -138,12 +138,16 @@ async def admin_only(user: dict[str, Any] = Depends(current_user)) -> dict[str, 
 
 # ---------- Seeding ----------
 async def seed_chapters():
-    """Insert Minna chapters from bundled DSL if collection is empty."""
-    if await db.chapters.count_documents({}) > 0:
-        return
+    """Insert Minna chapters from bundled DSL. Idempotent: only inserts chapters
+    whose number is not yet present, so future seed_data additions merge cleanly."""
+    existing = set()
+    async for d in db.chapters.find({}, {"_id": 0, "number": 1}):
+        existing.add(d["number"])
     docs = []
     now = datetime.now(timezone.utc).isoformat()
     for ch in ALL_CHAPTERS:
+        if ch["number"] in existing:
+            continue
         doc = {
             "number": ch["number"],
             "book": ch["book"],
@@ -160,7 +164,7 @@ async def seed_chapters():
         docs.append(doc)
     if docs:
         await db.chapters.insert_many(docs)
-        log.info("Seeded %d chapters", len(docs))
+        log.info("Seeded %d new chapters (numbers: %s)", len(docs), [d["number"] for d in docs])
 
 
 @app.on_event("startup")
