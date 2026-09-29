@@ -15,7 +15,7 @@ import bcrypt
 import jwt
 from fastapi import APIRouter, Cookie, Depends, FastAPI, HTTPException, Request, Response
 from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 from starlette.middleware.cors import CORSMiddleware
 
 mongo_url = os.environ["MONGO_URL"]
@@ -29,7 +29,7 @@ api = APIRouter(prefix="/api")
 logging.basicConfig(level=logging.INFO)
 
 class Credentials(BaseModel):
-    email: EmailStr
+    email: str = Field(min_length=3, max_length=254)
     password: str = Field(min_length=8, max_length=128)
     name: str = Field(default="", max_length=80)
 
@@ -45,6 +45,9 @@ class ProgressUpdate(BaseModel):
     lesson_id: str
     resume_position: int = Field(default=0, ge=0)
     completed: bool = False
+
+class EmailRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
 
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
@@ -162,8 +165,8 @@ async def refresh(response: Response, refresh_token: Optional[str] = Cookie(defa
     return {"message": "Session refreshed"}
 
 @api.post("/auth/forgot-password")
-async def forgot_password(data: dict[str, EmailStr]):
-    email = data["email"].lower()
+async def forgot_password(data: EmailRequest):
+    email = data.email.lower()
     user = await db.users.find_one({"email": email}, {"_id": 0})
     if not user:
         raise HTTPException(404, "No account found for this email")
@@ -209,8 +212,10 @@ async def submit_quiz(lesson_id: str, data: QuizSubmission, user: dict = Depends
     attempt = {"id": str(uuid.uuid4()), "user_id": user["id"], "lesson_id": lesson_id, "operation_id": data.operation_id, "score": round(correct / len(lesson["quiz"]) * 100), "created_at": datetime.now(timezone.utc).isoformat()}
     try: await db.attempts.insert_one(attempt)
     except Exception:
-        existing = await db.attempts.find_one({"user_id": user["id"], "operation_id": data.operation_id}, {"_id": 0})
-        return existing or attempt
+        existing = await db.attempts.find_one({"user_id": user["id"], "operation_id": data.operation_id}, {"_id": 0, "user_id": 0, "answers": 0})
+        if existing:
+            return existing
+        return {k: v for k, v in attempt.items() if k != "user_id"}
     return {k: v for k, v in attempt.items() if k != "user_id"}
 
 app.include_router(api)

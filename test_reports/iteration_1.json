@@ -1,0 +1,27 @@
+{
+  "summary": "Tested public lessons, registration/session cookies, lesson detail, quiz/progress integration, mobile UI, and seeded admin login. Public lessons and registration work; authenticated quiz submission fails on the duplicate/idempotent response path.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/lessons/{lesson_id}/quiz", "issue": "Repeated operation_id returns HTTP 500 because the duplicate attempt lookup includes Mongo ObjectId _id, which FastAPI cannot JSON encode.", "priority": "HIGH"},
+      {"endpoint": "POST /api/auth/login", "issue": "Required seeded admin editor@gakushu.local is rejected with 422 by Pydantic EmailStr because .local is treated as a special-use/reserved domain; admin cannot log in with the supplied credentials.", "priority": "HIGH"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Quiz submission", "issue": "The UI navigates back to the login page after the API returns 500, with no visible quiz error state.", "affected_selectors": ["[data-testid=submit-quiz-button]", "[data-testid=quiz-result]"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_gakushu_api.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": ["Exclude _id in the duplicate quiz attempt lookup or return a sanitized response.", "Allow the required seeded .local admin email through validation or change the seed contract consistently.", "Add frontend lesson loading/error handling and show quiz API errors instead of redirecting unauthenticated-looking users."],
+  "critical_code_review_comments": ["Lesson and dashboard fetches do not provide catch handlers, so API failures leave silent loading/empty states.", "service-worker.js exists but index.js does not register it, so offline shell fallback is not active."],
+  "updated_files": ["/app/backend/tests/test_gakushu_api.py", "/app/test_reports/iteration_1.json"],
+  "success_rate": {"backend": "50%", "frontend": "67%"},
+  "seed_data_creation": "Created one uniquely named learner through the public registration endpoint for regression testing; no seeded records modified.",
+  "retest_needed": true,
+  "should_call_test_agent_after_fix": true,
+  "context_for_next_testing_agent": "Public GET lessons/detail and new registration cookie session passed. Re-run duplicate quiz operation_id, admin login, forgot/change password, and PWA registration after fixes.",
+  "rca of the issue": "submit_quiz catches duplicate-key insertion and queries attempts with projection {\"_id\": 0}; however the observed 500 occurs when the existing duplicate record is returned with ObjectId _id, indicating the deployed duplicate lookup path does not sanitize the Mongo identifier. Admin login fails before credential lookup because EmailStr rejects editor@gakushu.local."
+}

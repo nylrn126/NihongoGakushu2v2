@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="2" time="3.068" timestamp="2026-09-29T01:32:35.226135+00:00" hostname="agent-env-fe6a83dc-4af5-4fc2-a2c3-c8f570aad26f"><testcase classname="tests.test_gakushu_api" name="test_public_lessons_and_detail" time="1.383" /><testcase classname="tests.test_gakushu_api" name="test_registration_cookie_refresh_quiz_progress_logout" time="1.184"><failure message="assert (500 == 200)&#10; +  where 500 = &lt;Response [500]&gt;.status_code">backend/tests/test_gakushu_api.py:43: in test_registration_cookie_refresh_quiz_progress_logout
+    assert quiz.status_code == 200 and quiz.json()["score"] == 100
+E   assert (500 == 200)
+E    +  where 500 = &lt;Response [500]&gt;.status_code</failure></testcase></testsuite></testsuites>
