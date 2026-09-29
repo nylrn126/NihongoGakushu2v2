@@ -20,6 +20,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from seed_data.loader import ALL_CHAPTERS, chapter_summary
 from quiz_generator import generate_extra_bunpo_questions
+from jukugo_generator import generate_extra_jukugo
 
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
@@ -168,6 +169,8 @@ async def startup():
     await db.sessions.create_index("jti", unique=True)
     await db.progress.create_index([("user_id", 1), ("chapter_number", 1), ("section", 1)], unique=True)
     await db.attempts.create_index([("user_id", 1), ("operation_id", 1)], unique=True)
+    await db.card_reviews.create_index([("user_id", 1), ("card_id", 1)], unique=True)
+    await db.card_reviews.create_index([("user_id", 1), ("due_at", 1)])
     await db.login_attempts.create_index("identifier", unique=True)
     await db.users.create_index("reset_expires_at", expireAfterSeconds=0)
     await db.chapters.create_index("number", unique=True)
@@ -709,14 +712,19 @@ async def library_quiz(type: str = "bunpo", book: Optional[int] = None,
         pool = []
         for ch in chapters:
             for q in (ch.get("content") or {}).get("quiz_susun", []):
-                shuffled = list(q.get("distractors") or [seg["text"] for seg in q.get("correct_order", [])])
-                random.shuffle(shuffled)
+                correct = q.get("correct_order", []) or []
+                distractors = q.get("distractors", []) or []
+                # tokens carry {text, reading} so furigana renders in UI
+                tokens = list(correct) + list(distractors)
+                random.shuffle(tokens)
                 pool.append({
                     "id": f"susun|{ch['number']}|{q['id']}",
                     "kind": "susun",
                     "chapter_number": ch["number"],
                     "stem": q.get("translation", ""),
-                    "tokens": shuffled or [seg["text"] for seg in q.get("correct_order", [])],
+                    "hint": q.get("hint") or "",
+                    "tokens": tokens,
+                    "correct_length": len(correct),
                 })
         random.shuffle(pool)
         return {"type": "susun", "questions": pool[:limit]}
@@ -897,6 +905,120 @@ async def library_weak_items(limit: int = 20, user: dict = Depends(learner)):
                           "back": "".join(s["text"] for s in (meta.get("correct_order") or [])),
                           "extra": "", "wrong_count": r["count"]})
     return {"total": len(cards), "cards": cards}
+
+
+# ---------- Spaced Repetition (SM-2 lite) ----------
+class ReviewInput(BaseModel):
+    card_id: str = Field(min_length=1, max_length=200)
+    quality: int = Field(ge=0, le=5)  # 0=again, 3=good, 5=easy
+
+
+def _sm2_update(prev: dict | None, quality: int) -> dict:
+    """Return updated {ease, interval, reps} per SM-2 algorithm."""
+    now = datetime.now(timezone.utc)
+    ease = (prev or {}).get("ease", 2.5)
+    interval = (prev or {}).get("interval", 0)
+    reps = (prev or {}).get("reps", 0)
+    if quality < 3:
+        reps = 0
+        interval = 1  # review tomorrow
+    else:
+        reps += 1
+        if reps == 1:
+            interval = 1
+        elif reps == 2:
+            interval = 3
+        else:
+            interval = round(interval * ease) or 1
+        ease = max(1.3, ease + 0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))
+    due = (now + timedelta(days=interval)).isoformat()
+    return {"ease": round(ease, 2), "interval": interval, "reps": reps,
+            "due_at": due, "last_reviewed": now.isoformat()}
+
+
+@api.post("/library/review")
+async def library_review(data: ReviewInput, user: dict = Depends(learner)):
+    prev = await db.card_reviews.find_one({"user_id": user["id"], "card_id": data.card_id}, {"_id": 0})
+    upd = _sm2_update(prev, data.quality)
+    doc = {"user_id": user["id"], "card_id": data.card_id, "quality": data.quality, **upd}
+    await db.card_reviews.update_one(
+        {"user_id": user["id"], "card_id": data.card_id},
+        {"$set": doc}, upsert=True,
+    )
+    return doc
+
+
+@api.get("/library/due-cards")
+async def library_due_cards(limit: int = 20, user: dict = Depends(learner)):
+    """Return cards due today for SR review. If empty, fall back to weak-items."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    reviews = await db.card_reviews.find(
+        {"user_id": user["id"], "due_at": {"$lte": now_iso}},
+        {"_id": 0}
+    ).sort("due_at", 1).to_list(limit)
+
+    async def resolve(card_id: str) -> dict | None:
+        _, meta = await _lookup_correct(card_id) if "|" in card_id else (None, None)
+        if not meta:
+            return None
+        kind = card_id.split("|")[0]
+        if kind == "bunpo":
+            return {"id": card_id, "kind": "bunpo",
+                    "front": meta.get("question_text", ""),
+                    "back": (meta.get("options") or [""])[meta.get("answer_index", 0)] if meta.get("options") else "",
+                    "extra": meta.get("explanation", "")}
+        if kind == "kotoba":
+            return {"id": card_id, "kind": "kotoba", "front": meta.get("word", ""),
+                    "back": meta.get("meaning", ""), "extra": meta.get("kana", "")}
+        if kind == "kanji":
+            return {"id": card_id, "kind": "kanji", "front": meta.get("character", ""),
+                    "back": meta.get("meaning", ""),
+                    "extra": f"{meta.get('onyomi','')} / {meta.get('kunyomi','')}"}
+        if kind == "susun":
+            return {"id": card_id, "kind": "susun", "front": meta.get("translation", ""),
+                    "back": "".join(s["text"] for s in (meta.get("correct_order") or [])),
+                    "extra": ""}
+        return None
+
+    cards = []
+    for r in reviews:
+        c = await resolve(r["card_id"])
+        if c:
+            cards.append({**c, "sr": {"ease": r["ease"], "interval": r["interval"], "reps": r["reps"]}})
+    return {"total": len(cards), "cards": cards, "as_of": now_iso}
+
+
+# ---------- Jukugo padding (LLM) ----------
+@api.post("/admin/chapters/{number}/pad-jukugo")
+async def admin_pad_jukugo(number: int, min_examples: int = 4, _: dict = Depends(admin_only)):
+    doc = await db.chapters.find_one({"number": number}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Bab tidak ditemukan")
+    content = dict(doc.get("content", {}))
+    kanji_list = list(content.get("kanji", []))
+    if not kanji_list:
+        return {"number": number, "padded": 0, "message": "Bab ini tidak punya kanji"}
+    padded = 0
+    for i, k in enumerate(kanji_list):
+        existing = list(k.get("jukugo") or [])
+        if len(existing) >= min_examples:
+            continue
+        need = min_examples - len(existing)
+        try:
+            extras = await generate_extra_jukugo(k, need)
+        except Exception as e:
+            log.exception("jukugo LLM failed for kanji %s", k.get("character"))
+            continue
+        if extras:
+            kanji_list[i] = {**k, "jukugo": existing + extras}
+            padded += 1
+    content["kanji"] = kanji_list
+    await db.chapters.update_one(
+        {"number": number},
+        {"$set": {"content": content, "updated_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    return {"number": number, "padded": padded,
+            "message": f"Berhasil melengkapi contoh untuk {padded} kanji"}
 
 
 app.include_router(api)

@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import KanjiStroke from "@/components/KanjiStroke";
+import { Ruby } from "@/components/Ruby";
 
 export default function KanjiPage() {
   const [book, setBook] = useState("1");
@@ -23,11 +25,11 @@ export default function KanjiPage() {
         <div>
           <div className="eyebrow">FLASHCARD KANJI</div>
           <h1>Hafalkan kanji per bab</h1>
-          <p className="muted">Pilih cakupan, lalu ketuk kartu untuk melihat bacaan dan arti.</p>
+          <p className="muted">Pilih cakupan, ketuk kartu untuk membalik. Ikon ↻ memutar ulang animasi goresan.</p>
         </div>
         <div className="pill-tabs" data-testid="kanji-scope">
-          <button className={book === "1" ? "active" : ""} onClick={() => setBook("1")} data-testid="kanji-book-1">Minna 1 (Bab 1–25)</button>
-          <button className={book === "2" ? "active" : ""} onClick={() => setBook("2")} data-testid="kanji-book-2">Minna 2 (Bab 26–50)</button>
+          <button className={book === "1" ? "active" : ""} onClick={() => setBook("1")} data-testid="kanji-book-1">Minna 1</button>
+          <button className={book === "2" ? "active" : ""} onClick={() => setBook("2")} data-testid="kanji-book-2">Minna 2</button>
           <button className={book === "all" ? "active" : ""} onClick={() => setBook("all")} data-testid="kanji-book-all">Semua Bab</button>
         </div>
       </section>
@@ -39,33 +41,39 @@ export default function KanjiPage() {
       {!loading && !cards.length && <div className="empty-state">Belum ada kanji untuk cakupan ini.</div>}
 
       {card && (
-        <div className="flashcard-wrap" data-testid="kanji-flashcard">
-          <button className={`flashcard kanji-fc ${flipped ? "flipped" : ""}`} onClick={() => setFlipped(!flipped)} data-testid={`flashcard-${card.character}`}>
-            <div className="fc-meta"><small>Bab {card.chapter_number}</small><small>{card.stroke_count} goresan</small></div>
-            {flipped ? (
-              <div className="fc-back">
-                <b>{card.meaning}</b>
-                <small>音 {card.onyomi || "—"} · 訓 {card.kunyomi || "—"}</small>
-                {card.jukugo?.length > 0 && (
-                  <ul className="jukugo-inline">
-                    {card.jukugo.slice(0, 3).map((j, i) => (
-                      <li key={i}><b>{j.segments?.map((s) => s.text).join("") || j.word}</b> · {j.meaning}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            ) : (
-              <div className="fc-front">
-                <strong className="kanji-huge">{card.character}</strong>
-                <small className="muted">Ketuk untuk melihat bacaan &amp; arti</small>
-              </div>
-            )}
-          </button>
+        <div className="kanji-page-card" data-testid="kanji-flashcard">
+          <div className="kanji-hero">
+            <div className="kanji-hero-meta">
+              <span className="chip">Bab {card.chapter_number}</span>
+              <span className="chip small">{card.stroke_count} goresan</span>
+            </div>
+            <KanjiStroke character={card.character} size={260} />
+            <div className="kanji-hero-info">
+              <div><small>音</small><b>{card.onyomi || "—"}</b></div>
+              <div><small>訓</small><b>{card.kunyomi || "—"}</b></div>
+              <div><small>意味</small><b>{card.meaning}</b></div>
+            </div>
+          </div>
+          <div className="kanji-examples" data-testid="kanji-examples">
+            <div className="content-label">CONTOH ( 4 kata + arti )</div>
+            <ul className="kanji-example-list">
+              {(card.jukugo || []).slice(0, 4).map((j, i) => (
+                <li key={i} data-testid={`kanji-example-${i}`}>
+                  <Ruby segments={j.segments && j.segments.length ? j.segments : [{ text: j.word, reading: j.kana || null }]} />
+                  <small className="hira">{j.kana}</small>
+                  <span>{j.meaning}</span>
+                </li>
+              ))}
+              {(card.jukugo || []).length < 4 && Array.from({ length: 4 - (card.jukugo || []).length }).map((_, i) => (
+                <li key={`empty-${i}`} className="muted small placeholder">Belum ada contoh · minta admin melengkapi</li>
+              ))}
+            </ul>
+          </div>
           <div className="flashcard-nav">
             <span className="muted">Kartu {idx + 1} dari {cards.length}</span>
             <div>
-              <button className="tiny-btn" onClick={() => { setFlipped(false); setIdx((idx - 1 + cards.length) % cards.length); }} data-testid="kanji-prev">← Acak</button>
-              <button className="tiny-btn accent" onClick={() => { setFlipped(false); setIdx((idx + 1) % cards.length); }} data-testid="kanji-next">Berikutnya →</button>
+              <button className="tiny-btn" onClick={() => setIdx((idx - 1 + cards.length) % cards.length)} data-testid="kanji-prev">← Sebelum</button>
+              <button className="tiny-btn accent" onClick={() => setIdx((idx + 1) % cards.length)} data-testid="kanji-next">Berikutnya →</button>
             </div>
           </div>
         </div>

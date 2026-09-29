@@ -97,6 +97,11 @@ export default function AdminChapter() {
               {busy === "pad" ? "AI generate…" : "Pad Quiz → 15"}
             </button>
           )}
+          <button className="tiny-btn accent" disabled={busy === "pad-jukugo"}
+                  onClick={() => doAction("pad-jukugo", () => api.post(`/admin/chapters/${number}/pad-jukugo`))}
+                  data-testid="admin-detail-pad-jukugo">
+            {busy === "pad-jukugo" ? "AI…" : "Pad Contoh Kanji → 4"}
+          </button>
           <button className="tiny-btn" disabled={busy === "reset"}
                   onClick={() => doAction("reset", () => api.post(`/admin/chapters/${number}/reset`))}
                   data-testid="admin-detail-reset">
@@ -216,16 +221,45 @@ function KanjiEditor({ items, onSave }) {
   const update = (i, patch) => setDraft(draft.map((d, idx) => idx === i ? { ...d, ...patch } : d));
   const remove = (i) => setDraft(draft.filter((_, idx) => idx !== i));
   const add = () => setDraft([...draft, { id: `new-${Date.now()}`, character: "", onyomi: "", kunyomi: "", meaning: "", stroke_count: 1, jukugo: [] }]);
+  const addJukugo = (i) => update(i, { jukugo: [...(draft[i].jukugo || []), { word: "", kana: "", meaning: "", segments: [{ text: "", reading: null }] }] });
+  const updJukugo = (i, ji, patch) => update(i, { jukugo: draft[i].jukugo.map((j, k) => k === ji ? { ...j, ...patch } : j) });
+  const removeJukugo = (i, ji) => update(i, { jukugo: draft[i].jukugo.filter((_, k) => k !== ji) });
   return (
     <EditorFrame title="Kanji" count={draft.length} onAdd={add} onSave={() => onSave(draft)} dirty={dirty}>
       {draft.map((k, i) => (
-        <div className="editor-row inline" key={k.id || i} data-testid={`edit-kanji-${i}`}>
-          <input className="ef-input ja-title" style={{ width: 70 }} value={k.character} onChange={(e) => update(i, { character: e.target.value })} placeholder="漢" />
-          <input className="ef-input" value={k.onyomi} onChange={(e) => update(i, { onyomi: e.target.value })} placeholder="Onyomi" />
-          <input className="ef-input" value={k.kunyomi} onChange={(e) => update(i, { kunyomi: e.target.value })} placeholder="Kunyomi" />
-          <input className="ef-input" value={k.meaning} onChange={(e) => update(i, { meaning: e.target.value })} placeholder="Arti" />
-          <input className="ef-input" type="number" style={{ width: 80 }} value={k.stroke_count} onChange={(e) => update(i, { stroke_count: Number(e.target.value) })} placeholder="Coretan" />
-          <button className="tiny-btn danger" onClick={() => remove(i)}>Hapus</button>
+        <div className="editor-row" key={k.id || i} data-testid={`edit-kanji-${i}`}>
+          <div className="editor-row inline">
+            <input className="ef-input ja-title" style={{ width: 70 }} value={k.character} onChange={(e) => update(i, { character: e.target.value })} placeholder="漢" />
+            <input className="ef-input" value={k.onyomi} onChange={(e) => update(i, { onyomi: e.target.value })} placeholder="Onyomi" />
+            <input className="ef-input" value={k.kunyomi} onChange={(e) => update(i, { kunyomi: e.target.value })} placeholder="Kunyomi" />
+            <input className="ef-input" value={k.meaning} onChange={(e) => update(i, { meaning: e.target.value })} placeholder="Arti" />
+            <input className="ef-input" type="number" style={{ width: 80 }} value={k.stroke_count} onChange={(e) => update(i, { stroke_count: Number(e.target.value) })} placeholder="Coretan" />
+            <button className="tiny-btn danger" onClick={() => remove(i)}>Hapus</button>
+          </div>
+          <details>
+            <summary className="muted small" style={{ cursor: "pointer", padding: "8px 0" }}>
+              Contoh (jukugo) — {(k.jukugo || []).length} kata
+            </summary>
+            <div className="jukugo-editor">
+              {(k.jukugo || []).map((j, ji) => (
+                <div className="editor-row" key={ji} data-testid={`edit-jukugo-${i}-${ji}`}>
+                  <div className="editor-row inline">
+                    <input className="ef-input" value={j.word} onChange={(e) => updJukugo(i, ji, { word: e.target.value })} placeholder="Kata" />
+                    <input className="ef-input" value={j.kana} onChange={(e) => updJukugo(i, ji, { kana: e.target.value })} placeholder="Kana" />
+                    <input className="ef-input" value={j.meaning} onChange={(e) => updJukugo(i, ji, { meaning: e.target.value })} placeholder="Arti" />
+                    {j.generated && <span className="badge">AI</span>}
+                    <button className="tiny-btn danger" onClick={() => removeJukugo(i, ji)}>×</button>
+                  </div>
+                  <FuriganaSegmentEditor
+                    value={j.segments || []}
+                    onChange={(v) => updJukugo(i, ji, { segments: v })}
+                    testid={`jukugo-furi-${i}-${ji}`}
+                  />
+                </div>
+              ))}
+              <button className="furi-add" onClick={() => addJukugo(i)} type="button" data-testid={`add-jukugo-${i}`}>+ Tambah contoh</button>
+            </div>
+          </details>
         </div>
       ))}
     </EditorFrame>
@@ -246,11 +280,18 @@ function KaiwaEditor({ data, onSave }) {
       <input className="ef-input" value={draft.judul || ""} onChange={(e) => upd({ judul: e.target.value })} placeholder="Judul percakapan" />
       <input className="ef-input" value={draft.latar || ""} onChange={(e) => upd({ latar: e.target.value })} placeholder="Latar (setting)" />
       {(draft.dialog || []).map((line, i) => (
-        <div className="editor-row inline" key={i} data-testid={`edit-kaiwa-${i}`}>
-          <input className="ef-input" value={line.speaker} onChange={(e) => updLine(i, { speaker: e.target.value })} placeholder="Pembicara" style={{ width: 100 }} />
-          <input className="ef-input" value={line.speaker_reading} onChange={(e) => updLine(i, { speaker_reading: e.target.value })} placeholder="Bacaan" style={{ width: 100 }} />
-          <input className="ef-input" value={line.translation} onChange={(e) => updLine(i, { translation: e.target.value })} placeholder="Terjemahan Bahasa Indonesia" />
-          <button className="tiny-btn danger" onClick={() => removeLine(i)}>Hapus</button>
+        <div className="editor-row" key={i} data-testid={`edit-kaiwa-${i}`}>
+          <div className="editor-row inline">
+            <input className="ef-input" value={line.speaker} onChange={(e) => updLine(i, { speaker: e.target.value })} placeholder="Pembicara" style={{ width: 120 }} />
+            <input className="ef-input" value={line.speaker_reading} onChange={(e) => updLine(i, { speaker_reading: e.target.value })} placeholder="Bacaan" style={{ width: 120 }} />
+            <input className="ef-input" value={line.translation} onChange={(e) => updLine(i, { translation: e.target.value })} placeholder="Terjemahan Bahasa Indonesia" />
+            <button className="tiny-btn danger" onClick={() => removeLine(i)}>Hapus</button>
+          </div>
+          <FuriganaSegmentEditor
+            value={line.segments || []}
+            onChange={(v) => updLine(i, { segments: v })}
+            testid={`kaiwa-furi-${i}`}
+          />
         </div>
       ))}
     </EditorFrame>

@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import "@/App.css";
 import "@/app-extras.css";
 import "@/app-v2.css";
+import "@/app-v3.css";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import Header from "@/components/Header";
 import Beranda from "@/pages/Beranda";
