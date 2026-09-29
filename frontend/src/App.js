@@ -1,38 +1,49 @@
-import { useEffect, useMemo, useState } from "react";
-import { BrowserRouter, Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
-import axios from "axios";
+import React from "react";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import "@/App.css";
+import "@/app-extras.css";
+import { AuthProvider, useAuth } from "@/lib/auth";
+import Header from "@/components/Header";
+import Home from "@/pages/Home";
+import AuthPage from "@/pages/AuthPage";
+import ChapterDetail from "@/pages/ChapterDetail";
+import Dashboard from "@/pages/Dashboard";
+import Admin from "@/pages/Admin";
+import AdminChapter from "@/pages/AdminChapter";
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const api = axios.create({ baseURL: API, withCredentials: true });
-const errorText = (e) => { const d = e?.response?.data?.detail; return Array.isArray(d) ? d.map(x => x.msg || JSON.stringify(x)).join(" ") : d || "Something went wrong. Try again."; };
-
-function useAuth() {
-  const [user, setUser] = useState(null); const [checking, setChecking] = useState(true);
-  useEffect(() => { api.get("/auth/me").then(r => setUser(r.data)).catch(() => setUser(false)).finally(() => setChecking(false)); }, []);
-  return { user, setUser, checking };
+function Protected({ children, adminOnly = false }) {
+  const { user, checking } = useAuth();
+  if (checking) return <div className="loading" data-testid="app-loading">Memuat Gakushu…</div>;
+  if (!user) return <Navigate to="/login" replace />;
+  if (adminOnly && user.role !== "admin") return <Navigate to="/dashboard" replace />;
+  return children;
 }
 
-function Header({ user, onLogout }) {
-  return <header className="topbar"><Link className="brand" to="/" data-testid="brand-home"><span className="brand-mark">学</span><span><b>Gakushu</b><small>Nihongo 2</small></span></Link><nav data-testid="main-navigation"><Link to="/" data-testid="lessons-nav">Lessons</Link>{user && <Link to="/dashboard" data-testid="dashboard-nav">My progress</Link>}</nav><div className="top-actions">{user ? <><span className="avatar" data-testid="user-avatar">{user.name?.slice(0, 1).toUpperCase()}</span><button className="text-button" onClick={onLogout} data-testid="logout-button">Sign out</button></> : <Link className="outline-button" to="/login" data-testid="login-nav">Sign in</Link>}</div></header>;
+function Shell() {
+  const { checking } = useAuth();
+  if (checking) return <div className="loading" data-testid="app-loading">Memuat Gakushu…</div>;
+  return (
+    <BrowserRouter>
+      <Header />
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/login" element={<AuthPage mode="login" />} />
+        <Route path="/register" element={<AuthPage mode="register" />} />
+        <Route path="/chapters/:number" element={<ChapterDetail />} />
+        <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
+        <Route path="/admin" element={<Protected adminOnly><Admin /></Protected>} />
+        <Route path="/admin/chapters/:number" element={<Protected adminOnly><AdminChapter /></Protected>} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+      <footer className="footer">学習 · Sedikit demi sedikit setiap hari</footer>
+    </BrowserRouter>
+  );
 }
 
-function AuthCard({ mode, onSuccess }) {
-  const register = mode === "register"; const [form, setForm] = useState({ email: "", password: "", name: "" }); const [error, setError] = useState(""); const [busy, setBusy] = useState(false); const [temporary, setTemporary] = useState("");
-  const submit = async (e) => { e.preventDefault(); setBusy(true); setError(""); try { const r = await api.post(`/auth/${register ? "register" : "login"}`, form); onSuccess(r.data); } catch (x) { setError(errorText(x)); } finally { setBusy(false); } };
-  const reset = async () => { if (!form.email) return setError("Enter your email first."); try { const r = await api.post("/auth/forgot-password", { email: form.email }); setTemporary(r.data.temporary_password); } catch (x) { setError(errorText(x)); } };
-  return <section className="auth-panel"><div className="eyebrow">{register ? "Start your practice" : "Welcome back"}</div><h1>{register ? "Make Japanese part of your day." : "Pick up where you left off."}</h1><p className="muted">Short lessons, useful words, and a gentle rhythm that sticks.</p><form onSubmit={submit} data-testid={`${mode}-form`}>{register && <label>Name<input data-testid="register-name-input" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="Your name" /></label>}<label>Email<input data-testid={`${mode}-email-input`} type="email" required value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="you@example.com" /></label><label>Password<input data-testid={`${mode}-password-input`} type="password" required value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="8 characters minimum" /></label>{error && <div className="error" data-testid="auth-error">{error}</div>}<button className="primary-button wide" disabled={busy} data-testid={`${mode}-submit-button`}>{busy ? "Opening…" : register ? "Create account" : "Sign in"}</button></form>{!register && <button className="quiet-link" onClick={reset} data-testid="forgot-password-button">Forgot password?</button>}{temporary && <div className="temporary-box" data-testid="temporary-password-popup"><b>Temporary password</b><strong>{temporary}</strong><span>Use it to sign in, then change it immediately in your dashboard.</span></div>}<p className="switch-copy">{register ? "Already learning?" : "New to Gakushu?"} <Link to={register ? "/login" : "/register"} data-testid="auth-switch-link">{register ? "Sign in" : "Create an account"}</Link></p></section>;
+export default function App() {
+  return (
+    <AuthProvider>
+      <Shell />
+    </AuthProvider>
+  );
 }
-
-function AuthPage({ mode, setUser }) { return <main className="auth-page"><div className="auth-art"><span className="large-kanji">学</span><p>Learn a little.<br /><em>Come back tomorrow.</em></p></div><AuthCard mode={mode} onSuccess={setUser} /></main>; }
-
-function Home({ user }) { const [lessons, setLessons] = useState([]); useEffect(() => { api.get("/lessons").then(r => setLessons(r.data)); }, []); return <main className="page"><section className="intro"><div><div className="eyebrow">MINNA NO NIHONGO · LEVEL 1</div><h1>Your next Japanese<br /><em>conversation</em> starts here.</h1><p>Build a steady practice with focused lessons, practical vocabulary, and small wins you can feel.</p><Link className="primary-button" to={user ? "/dashboard" : "/register"} data-testid="start-learning-button">{user ? "Continue learning" : "Start learning"}<span>→</span></Link></div><div className="intro-stamp"><span>毎日</span><small>ma i ni chi<br />every day</small></div></section><section className="lesson-section"><div className="section-heading"><div><div className="eyebrow">THE PATH</div><h2>Choose a lesson</h2></div><span className="lesson-count" data-testid="lesson-count">{lessons.length} lessons</span></div><div className="lesson-grid">{lessons.map((lesson, index) => <Link to={`/lessons/${lesson.id}`} className={`lesson-card ${index === 0 ? "featured" : ""}`} key={lesson.id} data-testid={`lesson-card-${lesson.id}`}><div className="lesson-top"><span className={`lesson-number ${lesson.accent}`}>{lesson.number}</span><span className="duration">{lesson.duration} min</span></div><div><h3>{lesson.title}</h3><p>{lesson.subtitle}</p></div><div className="lesson-footer"><span>{lesson.level}</span><span className="arrow">↗</span></div></Link>)}</div></section></main>; }
-
-function Dashboard({ user }) { const [data, setData] = useState(null); const [showChange, setShowChange] = useState(user.must_change_password); useEffect(() => { api.get("/progress").then(r => setData(r.data)); }, []); const percent = data ? Math.round(data.completed / Math.max(data.total_lessons, 1) * 100) : 0; return <main className="page dashboard"><section className="dashboard-head"><div><div className="eyebrow">YOUR PRACTICE</div><h1>おかえりなさい, {user.name}.</h1><p className="muted">A few minutes today keeps your Japanese moving forward.</p></div><div className="streak" data-testid="streak-summary"><strong>3</strong><span>day streak</span></div></section>{showChange && <ChangePassword onDone={() => setShowChange(false)} />}<section className="stats-row"><div className="stat" data-testid="progress-summary"><span>Lessons complete</span><b>{data?.completed || 0}<small> / {data?.total_lessons || 0}</small></b></div><div className="stat"><span>Current level</span><b>Starter</b><small>Keep building your base</small></div><div className="stat"><span>Practice rhythm</span><b>Warm</b><small>3 sessions this week</small></div></section><section className="continue-band"><div><div className="eyebrow">CONTINUE</div><h2>はじめまして</h2><p>Lesson 01 · Meet and greet</p></div><Link to="/lessons/lesson-01" className="primary-button" data-testid="continue-lesson-button">Open lesson <span>→</span></Link></section><section className="activity"><div className="section-heading"><div><div className="eyebrow">RECENT ACTIVITY</div><h2>Your trail</h2></div></div>{data?.attempts?.length ? data.attempts.map(item => <div className="activity-row" key={item.id} data-testid={`activity-${item.id}`}><span className="activity-dot">✓</span><span>Quiz completed</span><b>{item.score}%</b><small>{new Date(item.created_at).toLocaleDateString()}</small></div>) : <div className="empty-state" data-testid="activity-empty">Complete your first quiz and your trail will appear here.</div>}</section></main>; }
-
-function ChangePassword({ onDone }) { const [form, setForm] = useState({ current_password: "", new_password: "" }); const [error, setError] = useState(""); const submit = async e => { e.preventDefault(); try { await api.post("/auth/change-password", form); onDone(); } catch (x) { setError(errorText(x)); } }; return <div className="change-box" data-testid="change-password-panel"><b>Choose a new password</b><span>Your temporary password must be replaced before you continue.</span><form onSubmit={submit}><input data-testid="current-password-input" type="password" required placeholder="Temporary password" value={form.current_password} onChange={e => setForm({ ...form, current_password: e.target.value })} /><input data-testid="new-password-input" type="password" required placeholder="New password" value={form.new_password} onChange={e => setForm({ ...form, new_password: e.target.value })} /><button className="primary-button" data-testid="change-password-submit">Save password</button></form>{error && <div className="error" data-testid="change-password-error">{error}</div>}</div>; }
-
-function Lesson({ user }) { const { lessonId } = useParams(); const [lesson, setLesson] = useState(null); const [loadError, setLoadError] = useState(""); const [quizError, setQuizError] = useState(""); const [answers, setAnswers] = useState({}); const [result, setResult] = useState(null); const navigate = useNavigate(); useEffect(() => { api.get(`/lessons/${lessonId}`).then(r => setLesson(r.data)).catch(() => setLoadError("This lesson is temporarily unavailable.")); }, [lessonId]); if (loadError) return <main className="loading"><div className="error" data-testid="lesson-error">{loadError}</div></main>; if (!lesson) return <main className="loading" data-testid="lesson-loading">Loading lesson…</main>; const submit = async () => { if (!user) return navigate("/login"); setQuizError(""); try { const r = await api.post(`/lessons/${lessonId}/quiz`, { answers, operation_id: `${lessonId}-${Date.now()}` }); setResult(r.data); await api.put("/progress", { lesson_id: lessonId, completed: true, resume_position: 100 }); } catch (e) { setQuizError(errorText(e)); } }; return <main className="page lesson-page"><Link to="/" className="back-link" data-testid="back-to-lessons">← All lessons</Link><section className="lesson-hero"><div><div className="eyebrow">LESSON {lesson.number} · {lesson.duration} MINUTES</div><h1>{lesson.title}</h1><p>{lesson.description}</p></div><div className={`lesson-seal ${lesson.accent}`}>{lesson.number}</div></section><section className="lesson-content"><div><div className="content-label">WORDS TO KEEP</div><div className="vocab-list">{lesson.vocabulary.map(word => <div className="vocab-row" key={word.word} data-testid={`vocab-${word.word}`}><strong>{word.word}</strong><span>{word.reading}</span><b>{word.meaning}</b></div>)}</div></div><div className="quiz-panel"><div className="content-label">CHECK YOURSELF</div><h2>Quick practice</h2>{lesson.quiz.map(q => <div className="question" key={q.id}><b>{q.prompt}</b><div className="options">{q.options.map((option, i) => <button className={answers[q.id] === i ? "selected" : ""} onClick={() => setAnswers({ ...answers, [q.id]: i })} key={option} data-testid={`quiz-option-${q.id}-${i}`}>{option}</button>)}</div></div>)}{quizError && <div className="error" data-testid="quiz-error">{quizError}</div>}{result ? <div className="result" data-testid="quiz-result"><strong>{result.score}%</strong><span>{result.score === 100 ? "Perfect. すごい!" : "Nice work. Review and try again anytime."}</span></div> : <button className="primary-button wide" onClick={submit} data-testid="submit-quiz-button">Finish quiz <span>→</span></button>}</div></section></main>; }
-
-function App() { const auth = useAuth(); if (auth.checking) return <div className="loading" data-testid="app-loading">Loading Gakushu…</div>; const logout = async () => { await api.post("/auth/logout").catch(() => {}); auth.setUser(false); }; return <BrowserRouter><Header user={auth.user || null} onLogout={logout} /><Routes><Route path="/" element={<Home user={auth.user} />} /><Route path="/login" element={<AuthPage mode="login" setUser={auth.setUser} />} /><Route path="/register" element={<AuthPage mode="register" setUser={auth.setUser} />} /><Route path="/lessons/:lessonId" element={<Lesson user={auth.user} />} /><Route path="/dashboard" element={auth.user ? <Dashboard user={auth.user} /> : <AuthPage mode="login" setUser={auth.setUser} />} /></Routes><footer className="footer">学習 · small steps, every day</footer></BrowserRouter>; }
-export default App;
