@@ -15,6 +15,7 @@ import jwt
 from fastapi import APIRouter, Cookie, Depends, FastAPI, HTTPException, Request, Response
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
+from pymongo.errors import DuplicateKeyError
 from starlette.middleware.cors import CORSMiddleware
 
 from seed_data.loader import ALL_CHAPTERS, chapter_summary
@@ -413,7 +414,7 @@ async def submit_chapter_quiz(number: int, data: QuizSubmission, user: dict = De
     }
     try:
         await db.attempts.insert_one(attempt)
-    except Exception:
+    except DuplicateKeyError:
         existing = await db.attempts.find_one(
             {"user_id": user["id"], "operation_id": data.operation_id}, {"_id": 0, "user_id": 0}
         )
@@ -460,6 +461,8 @@ async def update_progress(data: ProgressUpdate, user: dict = Depends(learner)):
 # ---------- Admin ----------
 @api.get("/admin/chapters")
 async def admin_chapters(_: dict = Depends(admin_only)):
+    # Skip loading full content payload; public_chapter recomputes counts from content lists,
+    # so pull a projection with just the count-relevant arrays materialised as lengths.
     docs = await db.chapters.find({}, {"_id": 0}).sort("number", 1).to_list(200)
     return [public_chapter(d, include_content=False) for d in docs]
 

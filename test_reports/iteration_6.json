@@ -1,0 +1,25 @@
+{
+  "summary": "Full backend regression on Gakushu Nihongo v2 chapter model. Rewrote test_gakushu_api.py (old file targeted removed /api/lessons). 13/13 pytest cases pass covering public chapters (49 published, 2-50, no answers leaked), auth end-to-end with HttpOnly cookies + forgot-password + change-password, admin login role, admin gating (learner 403), admin CRUD (summary, detail with answer_index, update, publish toggle, reset), LLM quiz padding on chapter 27 (4->15) via GPT-5.4-mini, quiz submission idempotency via operation_id, and progress tracking after passing quiz. Login lockout after 5 failures returns 429 as expected.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_gakushu_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py public_chapter builds 'counts' every response, which is fine but each admin list of 49 chapters loads full content docs from Mongo before stripping — consider a projection excluding 'content' to avoid transferring MBs of nested lists on every /api/admin/chapters call.",
+    "quiz submission: when duplicate operation_id inserts race, the fallback catches ANY Exception (not just DuplicateKeyError). A transient Mongo write error would silently return a possibly-empty existing doc. Narrow the except to pymongo.errors.DuplicateKeyError.",
+    "seed_chapters only runs when collection is empty; there is no versioning, so schema/content changes to ALL_CHAPTERS after first boot require manual /admin/reset per chapter. Consider a content_version field to auto-reseed on bump.",
+    "admin_reset_chapter uses upsert=True but relies on a pre-existing doc; if number is missing it will create a doc missing 'number', 'published', 'created_at' fields (matched by filter number but not set explicitly). Add number/published/created_at to $set or $setOnInsert.",
+    "CORS fallback allows '*' with allow_credentials=True which browsers reject; ensure FRONTEND_URL is always set in production."
+  ],
+  "updated_files": ["/app/backend/tests/test_gakushu_api.py"],
+  "success_rate": {"backend": "100%", "frontend": "not tested"},
+  "test_credentials": "Admin mpdigitech.id@gmail.com / Admin@2026 (loaded from /app/memory/test_credentials.md).",
+  "seed_data_creation": "Tests create ephemeral TEST_ learner accounts via /api/auth/register. Chapter 27 was padded to 15 then reset back to 4. Chapter 26 title_translation was mutated then restored via reset endpoint. Chapter 2 publish toggled twice (net-zero).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test file at /app/backend/tests/test_gakushu_api.py is the current regression suite (13 tests, all pass). pytest.ini enforces -n 2 --dist loadscope; run serial with `-n 0`. REACT_APP_BACKEND_URL must be exported (not auto-loaded from frontend/.env). test_auth_hardening.py also exists but was not exercised this iteration. LLM padding takes ~5-10s and costs Emergent LLM credits — do not repeat unnecessarily.",
+  "rca of the issue": "N/A — no failures encountered."
+}

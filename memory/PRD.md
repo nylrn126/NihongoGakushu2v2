@@ -1,37 +1,44 @@
-# Gakushu Nihongo 2 — Product Record
+# Gakushu Nihongo 2 — PRD
 
-## Original problem statement
-Rebuild the Gakushu Nihongo 2 Japanese-learning PWA with new accounts, MongoDB-backed learning content and progress, and a responsive learner experience. The first release is the core learner flow: registration/login, public lessons, lesson detail, quiz, progress dashboard, and PWA shell.
+## Problem Statement (original, Bahasa Indonesia)
+Web app PWA untuk belajar bahasa Jepang dengan seluruh akun baru dan seluruh data aplikasi dikonsolidasikan ke satu MongoDB Atlas, sambil mempertahankan fitur inti repository dan membuka ruang revisi UI/fitur. Pengguna umum otodidak berbasis Minna no Nihongo 1 & 2. Frontend/PWA Vercel; FastAPI Render; MongoDB Atlas.
 
-## Architecture decisions
-- React with the existing CRA/Craco toolchain, React Router, Axios, and the repository's current CSS entry points.
-- FastAPI with Motor and the configured MongoDB connection only.
-- HttpOnly access/refresh cookies with refresh-session rotation; passwords hashed with bcrypt.
-- Lesson, quiz, progress, and attempt documents use stable string IDs. Quiz attempts use a unique user/operation compound index for idempotency.
-- PWA shell uses a manifest and versioned service worker; the API remains network-first.
+## User Personas
+1. **Learner** — otodidak Bahasa Jepang yang mengikuti Minna no Nihongo 1 & 2. Butuh materi grammar, kosakata, kanji, percakapan, quiz, flashcard, dan progres tersimpan.
+2. **Admin/Editor** — memelihara konten (CRUD bab, publish/unpublish, extend quiz via AI).
 
-## User personas
-- New Japanese learner following Minna no Nihongo.
-- Returning learner who wants a quick daily continuation point.
-- Future content editor/admin (seeded role and account; admin CRUD is outside this first slice).
+## Core Requirements (static)
+- Registrasi/login berbasis email+password dengan HttpOnly cookie session + JWT.
+- Password hashing bcrypt, reset (temporary), forced change, IP+email lockout 5 percobaan/15 menit.
+- MongoDB tunggal (collections: users, sessions, chapters, progress, attempts, login_attempts).
+- 49 bab Minna no Nihongo 1 & 2 (nomor 2–50) diimpor dari repo asli LTZ24/GakushuNihongo2.
+- Setiap bab menyimpan: bunpo, kotoba, kanji, kaiwa, quiz_bunpo, quiz_susun (dengan furigana segments).
+- Quiz submission idempotent via operation_id (unique compound index).
+- Progress per user per chapter+section; ringkasan dashboard.
+- Admin route diproteksi backend (role check); CRUD chapter + toggle publish + LLM auto-pad quiz ke 15 soal + reset dari sumber.
 
-## Core requirements (static)
-- Public lessons and lesson details with vocabulary and quiz.
-- New account registration, login, logout, refresh, temporary password reset, forced password change.
-- User progress, quiz score history, and resume position stored in MongoDB.
-- Responsive, mobile-first learner UI with loading, empty, and error states.
-- Installable PWA shell and offline shell fallback.
+## What's Been Implemented
+### 2026-02-09
+- Auth stack: register/login/logout/refresh/forgot/change-password dengan HttpOnly cookies (JWT HS256), lockout, forced password change.
+- Chapters (49 bab) diseed dari `seed_data/*.py` DSL; endpoint publik `/api/chapters` & `/api/chapters/{n}` (menghilangkan `answer_index`).
+- Quiz endpoint `/api/chapters/{n}/quiz` (idempotent, grade bunpo/susun, tulis progress bila skor ≥ 60).
+- Progress endpoint `/api/progress` menghitung ringkasan + 30 riwayat percobaan.
+- Admin CRUD: list, detail, PUT partial (title, translation, content merge, published), toggle publish, reset dari sumber.
+- Admin LLM pad-quiz: GPT-5.4-mini via Emergent Universal Key menambah soal grammar hingga ≥15.
+- Frontend Bahasa Indonesia: Home (Book 1 & Book 2 grid), ChapterDetail 6-tab (Bunpou/Kotoba/Kanji/Kaiwa/Quiz/Flashcard) + rendering furigana `<ruby>`, AuthPage, Dashboard, Admin summary table + tabbed editor.
+- 13/13 backend regression tests lolos (iteration_6).
 
-## Implemented — 2026-02-14
-- Replaced the starter API with auth, lesson, quiz, and progress endpoints.
-- Seeded three starter lessons and added MongoDB indexes.
-- Replaced the starter screen with a Japanese-learning path, auth screens, lesson view, quiz flow, and dashboard.
-- Added PWA manifest, service worker, install metadata, and session-aware navigation.
-- Added failed-login lockout and startup admin-password reconciliation.
+## Prioritized Backlog
+### P1
+- Full editor untuk `question_segments` (rich furigana) selain `question_text`.
+- Editor detail untuk quiz susun kata.
+- Bulk "Pad all quizzes → 15" admin action dengan progress bar.
+- Object storage untuk audio/gambar kanji (Emergent Object Storage).
+- Streak tracking N-hari.
 
-## Prioritized backlog
-- P0: Verify API and browser flows against the running preview.
-- P1: Add protected admin/editor CRUD for lessons, quizzes, vocabulary, and publish state.
-- P1: Add offline lesson download and queued progress sync with conflict timestamps.
-- P2: Add object-storage media metadata and audio playback.
-- P2: Add production email delivery for password reset instead of in-app temporary-password display.
+### P2
+- Content versioning untuk auto-reseed jika DSL sumber di-bump.
+- Real email password reset (Resend).
+- Offline PWA sync queue dengan konflik resolution.
+- Audit log admin actions.
+- Bahasa UI toggle (ID/EN/JP).
