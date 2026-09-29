@@ -27,6 +27,7 @@ Rebuild the Gakushu Nihongo 2 Japanese-learning PWA with new accounts, MongoDB-b
 - Seeded three starter lessons and added MongoDB indexes.
 - Replaced the starter screen with a Japanese-learning path, auth screens, lesson view, quiz flow, and dashboard.
 - Added PWA manifest, service worker, install metadata, and session-aware navigation.
+- Added failed-login lockout and startup admin-password reconciliation.
 
 ## Prioritized backlog
 - P0: Verify API and browser flows against the running preview.

@@ -115,11 +115,16 @@ async def startup():
     await db.sessions.create_index("jti", unique=True)
     await db.progress.create_index([("user_id", 1), ("lesson_id", 1)], unique=True)
     await db.attempts.create_index([("user_id", 1), ("operation_id", 1)], unique=True)
+    await db.login_attempts.create_index("identifier", unique=True)
     await db.users.create_index("reset_expires_at", expireAfterSeconds=0)
     await seed_content()
     admin_email, admin_password = os.environ.get("ADMIN_EMAIL"), os.environ.get("ADMIN_PASSWORD")
-    if admin_email and admin_password and not await db.users.find_one({"email": admin_email.lower()}):
-        await db.users.insert_one({"id": str(uuid.uuid4()), "email": admin_email.lower(), "name": "Content editor", "password_hash": hash_password(admin_password), "role": "admin", "must_change_password": False, "created_at": datetime.now(timezone.utc).isoformat()})
+    if admin_email and admin_password:
+        existing_admin = await db.users.find_one({"email": admin_email.lower()}, {"_id": 0})
+        if not existing_admin:
+            await db.users.insert_one({"id": str(uuid.uuid4()), "email": admin_email.lower(), "name": "Content editor", "password_hash": hash_password(admin_password), "role": "admin", "must_change_password": False, "created_at": datetime.now(timezone.utc).isoformat()})
+        elif not verify_password(admin_password, existing_admin["password_hash"]):
+            await db.users.update_one({"id": existing_admin["id"]}, {"$set": {"password_hash": hash_password(admin_password), "must_change_password": False}})
 
 @api.get("/")
 async def root():
@@ -138,9 +143,20 @@ async def register(data: Credentials, response: Response):
 
 @api.post("/auth/login")
 async def login(data: Credentials, response: Response, request: Request):
+    identifier = f"{request.client.host if request.client else 'unknown'}:{data.email.lower()}"
+    now = datetime.now(timezone.utc)
+    attempt = await db.login_attempts.find_one({"identifier": identifier}, {"_id": 0})
+    if attempt and attempt.get("locked_until") and datetime.fromisoformat(attempt["locked_until"]) > now:
+        raise HTTPException(429, "Too many attempts. Try again in 15 minutes")
     user = await db.users.find_one({"email": data.email.lower()}, {"_id": 0})
     if not user or not verify_password(data.password, user["password_hash"]):
+        failures = (attempt.get("failures", 0) if attempt else 0) + 1
+        update = {"failures": failures, "last_attempt": now.isoformat()}
+        if failures >= 5:
+            update["locked_until"] = (now + timedelta(minutes=15)).isoformat()
+        await db.login_attempts.update_one({"identifier": identifier}, {"$set": update, "$setOnInsert": {"identifier": identifier}}, upsert=True)
         raise HTTPException(401, "Email or password is incorrect")
+    await db.login_attempts.delete_one({"identifier": identifier})
     jti = set_session(response, user["id"])
     await db.sessions.insert_one({"jti": jti, "user_id": user["id"], "ip": request.client.host if request.client else None, "created_at": datetime.now(timezone.utc).isoformat()})
     return public_user(user)

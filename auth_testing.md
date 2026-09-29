@@ -7,5 +7,7 @@
 5. `POST /api/auth/login` rejects incorrect credentials and accepts the seeded admin.
 6. `POST /api/auth/forgot-password` returns a one-time temporary password for an existing account; the next password change must use it.
 7. `POST /api/auth/change-password` clears `must_change_password` and accepts the new password on the next login.
+8. Five failed login attempts for one IP/email pair return a temporary 429 lockout; a successful login clears the counter.
+9. Startup reconciles the seeded admin password with `ADMIN_PASSWORD` without exposing the hash.
 
 Seeded admin: `editor@gakushu.local` / `GakushuEditor2026!` (role: admin)
