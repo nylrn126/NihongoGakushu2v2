@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, errorText } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Ruby } from "@/components/Ruby";
+import FuriganaSegmentEditor from "@/components/FuriganaSegmentEditor";
 
 const TABS = [
   { id: "bunpo", label: "Bunpou" },
@@ -187,13 +188,23 @@ function KotobaEditor({ items, onSave }) {
   return (
     <EditorFrame title="Kotoba" count={draft.length} onAdd={add} onSave={() => onSave(draft)} dirty={dirty}>
       {draft.map((k, i) => (
-        <div className="editor-row inline" key={k.id || i} data-testid={`edit-kotoba-${i}`}>
-          <input className="ef-input" value={k.word} onChange={(e) => update(i, { word: e.target.value })} placeholder="Kata (kanji/kana)" />
-          <input className="ef-input" value={k.kana} onChange={(e) => update(i, { kana: e.target.value })} placeholder="Kana" />
-          <input className="ef-input" value={k.romaji} onChange={(e) => update(i, { romaji: e.target.value })} placeholder="Romaji" />
-          <input className="ef-input" value={k.meaning} onChange={(e) => update(i, { meaning: e.target.value })} placeholder="Arti" />
-          <input className="ef-input" value={k.word_type} onChange={(e) => update(i, { word_type: e.target.value })} placeholder="Jenis" />
-          <button className="tiny-btn danger" onClick={() => remove(i)}>Hapus</button>
+        <div className="editor-row" key={k.id || i} data-testid={`edit-kotoba-${i}`}>
+          <div className="editor-row inline">
+            <input className="ef-input" value={k.word} onChange={(e) => update(i, { word: e.target.value })} placeholder="Kata (kanji/kana)" />
+            <input className="ef-input" value={k.kana} onChange={(e) => update(i, { kana: e.target.value })} placeholder="Kana" />
+            <input className="ef-input" value={k.romaji} onChange={(e) => update(i, { romaji: e.target.value })} placeholder="Romaji" />
+            <input className="ef-input" value={k.meaning} onChange={(e) => update(i, { meaning: e.target.value })} placeholder="Arti" />
+            <input className="ef-input" value={k.word_type} onChange={(e) => update(i, { word_type: e.target.value })} placeholder="Jenis" />
+            <button className="tiny-btn danger" onClick={() => remove(i)}>Hapus</button>
+          </div>
+          <details>
+            <summary className="muted small" style={{ cursor: "pointer", padding: "6px 0" }}>Edit furigana (segments)</summary>
+            <FuriganaSegmentEditor
+              value={k.segments || []}
+              onChange={(v) => update(i, { segments: v })}
+              testid={`kotoba-furi-${i}`}
+            />
+          </details>
         </div>
       ))}
     </EditorFrame>

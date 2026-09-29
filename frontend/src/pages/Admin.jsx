@@ -48,6 +48,28 @@ function AdminList() {
     finally { setBusy(null); }
   };
 
+  const [padJob, setPadJob] = useState(null);
+  const pollJob = (id) => {
+    const tick = async () => {
+      try {
+        const r = await api.get(`/admin/pad-jobs/${id}`);
+        setPadJob(r.data);
+        if (!r.data.finished) setTimeout(tick, 2000);
+        else load();
+      } catch { setTimeout(tick, 3000); }
+    };
+    tick();
+  };
+  const startPadAll = async () => {
+    setError("");
+    try {
+      const r = await api.post("/admin/pad-all-quizzes");
+      setPadJob({ id: r.data.job_id, total: r.data.total, done: 0, progress: [], finished: false });
+      pollJob(r.data.job_id);
+    } catch (e) { setError(errorText(e)); }
+  };
+  const needsPad = chapters.filter((c) => c.counts.quiz_bunpo < 15).length;
+
   return (
     <main className="page admin-page">
       <section className="dashboard-head">
@@ -57,6 +79,41 @@ function AdminList() {
           <p className="muted">Ringkasan semua bab Minna no Nihongo 1 &amp; 2. Klik bab untuk mengedit isi.</p>
         </div>
       </section>
+
+      {needsPad > 0 && (
+        <div className="pad-all-panel" data-testid="pad-all-panel">
+          <div>
+            <b>AI Quiz Padding — perlengkapi semua quiz Bunpo ke 15 soal</b>
+            <div className="muted small">{needsPad} bab masih di bawah 15 soal. Padding dilakukan berurutan (~10 dtk / bab).</div>
+          </div>
+          {!padJob && (
+            <button className="tiny-btn accent" onClick={startPadAll} data-testid="pad-all-start">
+              Perlengkapi semua quiz ke 15
+            </button>
+          )}
+          {padJob && (
+            <>
+              <div className="progres-bar" style={{ height: 6 }}>
+                <span style={{ width: `${padJob.total ? Math.round((padJob.done / padJob.total) * 100) : 0}%` }} />
+              </div>
+              <div className="muted small">
+                {padJob.done}/{padJob.total} bab selesai {padJob.finished ? "· ✅ Selesai" : "· berjalan…"}
+              </div>
+              <div className="pad-progress-list" data-testid="pad-progress-list">
+                {[...(padJob.progress || [])].reverse().map((p) => (
+                  <div className={`pad-progress-row ${p.status}`} key={p.number}>
+                    <b>Bab {p.number}</b>
+                    <span>{p.status}</span>
+                    <span>{p.status === "ok" ? `→ ${p.count} soal (+${p.generated} AI)` : p.status === "skip" ? `sudah ${p.count} soal` : p.status === "error" ? p.error : ""}</span>
+                  </div>
+                ))}
+              </div>
+              {padJob.finished && <button className="tiny-btn" onClick={() => setPadJob(null)} data-testid="pad-all-close">Tutup</button>}
+            </>
+          )}
+        </div>
+      )}
+
       {notice && <div className="notice" data-testid="admin-notice">{notice}</div>}
       {error && <div className="error" data-testid="admin-error">{error}</div>}
       <div className="admin-table-wrap">

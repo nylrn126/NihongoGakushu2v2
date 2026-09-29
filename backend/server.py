@@ -435,14 +435,39 @@ async def get_progress(user: dict = Depends(learner)):
     prog = await db.progress.find({"user_id": user["id"]}, {"_id": 0, "user_id": 0}).to_list(500)
     attempts = await db.attempts.find(
         {"user_id": user["id"]}, {"_id": 0, "user_id": 0, "items": 0}
-    ).sort("created_at", -1).to_list(30)
+    ).sort("created_at", -1).to_list(60)
     total_chapters = await db.chapters.count_documents({"published": True})
     done_numbers = {p["chapter_number"] for p in prog if p.get("completed")}
+    # Streak: consecutive distinct-date attempts ending today (JST-agnostic UTC)
+    dates = set()
+    for a in attempts:
+        try:
+            dates.add(a["created_at"][:10])
+        except (KeyError, TypeError):
+            pass
+    from datetime import date
+    today = datetime.now(timezone.utc).date()
+    streak = 0
+    for i in range(60):
+        d = (today - timedelta(days=i)).isoformat()
+        if d in dates:
+            streak += 1
+        elif i == 0:
+            # Allow missing today, start counting from yesterday
+            continue
+        else:
+            break
+    best_score = max((a.get("score", 0) for a in attempts), default=0)
+    average = round(sum(a.get("score", 0) for a in attempts) / max(len(attempts), 1))
     return {
         "completed": len(done_numbers),
         "total_chapters": total_chapters,
         "progress": prog,
-        "attempts": attempts,
+        "attempts": attempts[:30],
+        "streak": streak,
+        "best_score": best_score,
+        "average_score": average,
+        "total_sessions": len(attempts),
     }
 
 
@@ -458,11 +483,10 @@ async def update_progress(data: ProgressUpdate, user: dict = Depends(learner)):
             "section": data.section, "updated_at": now}
 
 
+
 # ---------- Admin ----------
 @api.get("/admin/chapters")
 async def admin_chapters(_: dict = Depends(admin_only)):
-    # Skip loading full content payload; public_chapter recomputes counts from content lists,
-    # so pull a projection with just the count-relevant arrays materialised as lengths.
     docs = await db.chapters.find({}, {"_id": 0}).sort("number", 1).to_list(200)
     return [public_chapter(d, include_content=False) for d in docs]
 
@@ -557,6 +581,317 @@ async def admin_reset_chapter(number: int, _: dict = Depends(admin_only)):
     )
     doc = await db.chapters.find_one({"number": number}, {"_id": 0})
     return public_chapter(doc, include_content=True)
+
+
+# ---------- Bulk pad job (in-memory) ----------
+PAD_JOBS: dict[str, dict] = {}
+
+
+async def _run_pad_all(job_id: str, chapter_numbers: list[int]):
+    job = PAD_JOBS[job_id]
+    for n in chapter_numbers:
+        if job["cancelled"]:
+            break
+        doc = await db.chapters.find_one({"number": n}, {"_id": 0})
+        if not doc:
+            job["progress"].append({"number": n, "status": "missing"})
+            continue
+        current = list((doc.get("content") or {}).get("quiz_bunpo", []))
+        if len(current) >= 15:
+            job["progress"].append({"number": n, "status": "skip", "count": len(current)})
+            job["done"] += 1
+            continue
+        try:
+            extras = await generate_extra_bunpo_questions(doc, 15 - len(current))
+            combined = current + extras
+            content = dict(doc.get("content", {}))
+            content["quiz_bunpo"] = combined
+            await db.chapters.update_one(
+                {"number": n},
+                {"$set": {"content": content, "quiz_padded": len(combined) >= 15,
+                          "updated_at": datetime.now(timezone.utc).isoformat()}},
+            )
+            job["progress"].append({"number": n, "status": "ok", "count": len(combined), "generated": len(extras)})
+        except Exception as e:
+            log.exception("bulk pad failed for %s", n)
+            job["progress"].append({"number": n, "status": "error", "error": str(e)[:200]})
+        job["done"] += 1
+    job["finished"] = True
+
+
+@api.post("/admin/pad-all-quizzes")
+async def admin_pad_all(_: dict = Depends(admin_only)):
+    import asyncio
+    docs = await db.chapters.find({}, {"_id": 0, "number": 1, "content.quiz_bunpo": 1}).sort("number", 1).to_list(200)
+    targets = [d["number"] for d in docs if len((d.get("content") or {}).get("quiz_bunpo", [])) < 15]
+    job_id = str(uuid.uuid4())
+    PAD_JOBS[job_id] = {"id": job_id, "total": len(targets), "done": 0,
+                        "progress": [], "finished": False, "cancelled": False,
+                        "started_at": datetime.now(timezone.utc).isoformat()}
+    asyncio.create_task(_run_pad_all(job_id, targets))
+    return {"job_id": job_id, "total": len(targets), "targets": targets}
+
+
+@api.get("/admin/pad-jobs/{job_id}")
+async def admin_pad_status(job_id: str, _: dict = Depends(admin_only)):
+    job = PAD_JOBS.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job tidak ditemukan")
+    return job
+
+
+# ---------- Library (aggregate across chapters) ----------
+import random
+
+
+async def _load_chapters_scope(book: Optional[int], bab: Optional[int]) -> list[dict]:
+    query: dict = {"published": True}
+    if bab is not None:
+        query["number"] = bab
+    elif book is not None:
+        query["book"] = book
+    return await db.chapters.find(query, {"_id": 0}).sort("number", 1).to_list(200)
+
+
+@api.get("/library/kanji")
+async def library_kanji(book: Optional[int] = None, bab: Optional[int] = None):
+    chapters = await _load_chapters_scope(book, bab)
+    cards = []
+    for ch in chapters:
+        for k in (ch.get("content") or {}).get("kanji", []):
+            cards.append({**k, "chapter_number": ch["number"], "chapter_title": ch["title"]})
+    return {"total": len(cards), "cards": cards}
+
+
+@api.get("/library/kotoba")
+async def library_kotoba(book: Optional[int] = None, bab: Optional[int] = None):
+    chapters = await _load_chapters_scope(book, bab)
+    cards = []
+    for ch in chapters:
+        for k in (ch.get("content") or {}).get("kotoba", []):
+            cards.append({**k, "chapter_number": ch["number"]})
+    return {"total": len(cards), "cards": cards}
+
+
+def _make_options_from(pool: list[str], correct: str, n: int = 4) -> list[str]:
+    distractors = [p for p in pool if p and p != correct]
+    random.shuffle(distractors)
+    options = distractors[: n - 1] + [correct]
+    random.shuffle(options)
+    return options
+
+
+@api.get("/library/quiz")
+async def library_quiz(type: str = "bunpo", book: Optional[int] = None,
+                       bab: Optional[int] = None, limit: int = 15):
+    chapters = await _load_chapters_scope(book, bab)
+    limit = max(5, min(limit, 30))
+    if type == "bunpo":
+        pool = []
+        for ch in chapters:
+            for q in (ch.get("content") or {}).get("quiz_bunpo", []):
+                pool.append({
+                    "id": f"bunpo|{ch['number']}|{q['id']}",
+                    "kind": "bunpo",
+                    "chapter_number": ch["number"],
+                    "stem": q.get("question_text") or "".join(s.get("text", "") for s in (q.get("question_segments") or [])),
+                    "options": q.get("options", []),
+                })
+        random.shuffle(pool)
+        return {"type": "bunpo", "questions": pool[:limit]}
+
+    if type == "susun":
+        pool = []
+        for ch in chapters:
+            for q in (ch.get("content") or {}).get("quiz_susun", []):
+                shuffled = list(q.get("distractors") or [seg["text"] for seg in q.get("correct_order", [])])
+                random.shuffle(shuffled)
+                pool.append({
+                    "id": f"susun|{ch['number']}|{q['id']}",
+                    "kind": "susun",
+                    "chapter_number": ch["number"],
+                    "stem": q.get("translation", ""),
+                    "tokens": shuffled or [seg["text"] for seg in q.get("correct_order", [])],
+                })
+        random.shuffle(pool)
+        return {"type": "susun", "questions": pool[:limit]}
+
+    if type == "kanji":
+        all_kanji = []
+        for ch in chapters:
+            for k in (ch.get("content") or {}).get("kanji", []):
+                all_kanji.append({**k, "chapter_number": ch["number"]})
+        random.shuffle(all_kanji)
+        picks = all_kanji[:limit]
+        pool_meanings = [k["meaning"] for k in all_kanji]
+        qs = [{
+            "id": f"kanji|{k['chapter_number']}|{k['character']}",
+            "kind": "kanji",
+            "chapter_number": k["chapter_number"],
+            "stem": k["character"],
+            "hint": f"{k.get('onyomi','') or '—'} / {k.get('kunyomi','') or '—'}",
+            "options": _make_options_from(pool_meanings, k["meaning"]),
+        } for k in picks]
+        return {"type": "kanji", "questions": qs}
+
+    if type == "kotoba":
+        all_kotoba = []
+        for ch in chapters:
+            for k in (ch.get("content") or {}).get("kotoba", []):
+                all_kotoba.append({**k, "chapter_number": ch["number"]})
+        random.shuffle(all_kotoba)
+        picks = all_kotoba[:limit]
+        pool_meanings = [k["meaning"] for k in all_kotoba]
+        qs = [{
+            "id": f"kotoba|{k['chapter_number']}|{k['id']}",
+            "kind": "kotoba",
+            "chapter_number": k["chapter_number"],
+            "stem": k.get("word") or k.get("kana"),
+            "hint": k.get("kana", ""),
+            "options": _make_options_from(pool_meanings, k["meaning"]),
+        } for k in picks]
+        return {"type": "kotoba", "questions": qs}
+
+    if type == "campuran":
+        # blend: 5 kanji, 5 kotoba, 5 bunpo
+        parts = []
+        for sub in ("kanji", "kotoba", "bunpo"):
+            r = await library_quiz(type=sub, book=book, bab=bab, limit=5)  # type: ignore
+            parts.extend(r["questions"])
+        random.shuffle(parts)
+        return {"type": "campuran", "questions": parts[:limit]}
+
+    raise HTTPException(400, "Tipe quiz tidak dikenal")
+
+
+class LibraryQuizAttempt(BaseModel):
+    type: str
+    book: Optional[int] = None
+    items: list[dict]
+    operation_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+
+async def _lookup_correct(item_id: str) -> tuple[Optional[str], Optional[dict]]:
+    """Given aggregated item id like 'kanji|26|漢', return (correct_value, item_meta)."""
+    kind, _, rest = item_id.partition("|")
+    ch_num_s, _, ref = rest.partition("|")
+    try:
+        ch_num = int(ch_num_s)
+    except ValueError:
+        return None, None
+    doc = await db.chapters.find_one({"number": ch_num, "published": True}, {"_id": 0})
+    if not doc:
+        return None, None
+    content = doc.get("content") or {}
+    if kind == "kanji":
+        k = next((x for x in content.get("kanji", []) if x.get("character") == ref), None)
+        return (k["meaning"], k) if k else (None, None)
+    if kind == "kotoba":
+        k = next((x for x in content.get("kotoba", []) if x.get("id") == ref), None)
+        return (k["meaning"], k) if k else (None, None)
+    if kind == "bunpo":
+        q = next((x for x in content.get("quiz_bunpo", []) if x.get("id") == ref), None)
+        if not q:
+            return None, None
+        opts = q.get("options", [])
+        idx = q.get("answer_index", 0)
+        return (opts[idx] if 0 <= idx < len(opts) else None), q
+    if kind == "susun":
+        q = next((x for x in content.get("quiz_susun", []) if x.get("id") == ref), None)
+        if not q:
+            return None, None
+        return ("|".join(seg["text"] for seg in q.get("correct_order", []))), q
+    return None, None
+
+
+@api.post("/library/quiz/attempt")
+async def library_quiz_attempt(data: LibraryQuizAttempt, user: dict = Depends(learner)):
+    items_result = []
+    correct = 0
+    for it in data.items:
+        item_id = it.get("id", "")
+        picked = it.get("picked")
+        correct_val, meta = await _lookup_correct(item_id)
+        if item_id.startswith("susun|"):
+            picked_val = "|".join(picked) if isinstance(picked, list) else str(picked or "")
+        else:
+            picked_val = str(picked) if picked is not None else ""
+        is_correct = correct_val is not None and picked_val == correct_val
+        if is_correct:
+            correct += 1
+        items_result.append({
+            "id": item_id, "picked": picked_val,
+            "correct_value": correct_val,
+            "is_correct": is_correct,
+            "explanation": (meta or {}).get("explanation") or (meta or {}).get("meaning", ""),
+        })
+    total = max(len(data.items), 1)
+    score = round(correct / total * 100)
+    attempt = {
+        "id": str(uuid.uuid4()),
+        "user_id": user["id"],
+        "chapter_number": 0,  # aggregate
+        "quiz_kind": data.type,
+        "operation_id": data.operation_id,
+        "score": score,
+        "correct": correct,
+        "total": len(data.items),
+        "items": items_result,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        await db.attempts.insert_one(attempt)
+    except DuplicateKeyError:
+        existing = await db.attempts.find_one(
+            {"user_id": user["id"], "operation_id": data.operation_id}, {"_id": 0, "user_id": 0}
+        )
+        if existing:
+            return existing
+    return public_attempt(attempt)
+
+
+@api.get("/library/weak-items")
+async def library_weak_items(limit: int = 20, user: dict = Depends(learner)):
+    """Return items the user got wrong most often, resolvable back to source content."""
+    pipeline = [
+        {"$match": {"user_id": user["id"]}},
+        {"$unwind": "$items"},
+        {"$match": {"items.is_correct": False}},
+        {"$group": {"_id": "$items.id", "count": {"$sum": 1}, "last": {"$max": "$created_at"}}},
+        {"$sort": {"count": -1, "last": -1}},
+        {"$limit": limit},
+    ]
+    rows = await db.attempts.aggregate(pipeline).to_list(limit)
+    cards = []
+    for r in rows:
+        _id = r["_id"]
+        if not isinstance(_id, str):
+            continue
+        _, meta = await _lookup_correct(_id) if "|" in _id else (None, None)
+        kind = _id.split("|")[0] if "|" in _id else "bunpo"
+        if kind == "bunpo" and meta:
+            cards.append({
+                "id": _id, "kind": "bunpo",
+                "front": meta.get("question_text", ""),
+                "back": (meta.get("options") or [""])[meta.get("answer_index", 0)] if meta.get("options") else "",
+                "extra": meta.get("explanation", ""),
+                "wrong_count": r["count"],
+            })
+        elif kind == "kotoba" and meta:
+            cards.append({"id": _id, "kind": "kotoba", "front": meta.get("word"),
+                          "back": meta.get("meaning"), "extra": meta.get("kana", ""),
+                          "wrong_count": r["count"]})
+        elif kind == "kanji" and meta:
+            cards.append({"id": _id, "kind": "kanji", "front": meta.get("character"),
+                          "back": meta.get("meaning"),
+                          "extra": f"{meta.get('onyomi','')} / {meta.get('kunyomi','')}",
+                          "wrong_count": r["count"]})
+        elif kind == "susun" and meta:
+            cards.append({"id": _id, "kind": "susun",
+                          "front": meta.get("translation", ""),
+                          "back": "".join(s["text"] for s in (meta.get("correct_order") or [])),
+                          "extra": "", "wrong_count": r["count"]})
+    return {"total": len(cards), "cards": cards}
 
 
 app.include_router(api)
