@@ -628,6 +628,11 @@ async def admin_pad_all(_: dict = Depends(admin_only)):
     PAD_JOBS[job_id] = {"id": job_id, "total": len(targets), "done": 0,
                         "progress": [], "finished": False, "cancelled": False,
                         "started_at": datetime.now(timezone.utc).isoformat()}
+    # keep only 20 most recent jobs to bound memory
+    if len(PAD_JOBS) > 20:
+        old = sorted(PAD_JOBS.items(), key=lambda x: x[1].get("started_at", ""))[: len(PAD_JOBS) - 20]
+        for k, _v in old:
+            PAD_JOBS.pop(k, None)
     asyncio.create_task(_run_pad_all(job_id, targets))
     return {"job_id": job_id, "total": len(targets), "targets": targets}
 

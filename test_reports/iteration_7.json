@@ -1,0 +1,32 @@
+{
+  "summary": "Backend-only regression + new-feature testing for Gakushu Nihongo v2 iteration 7 (library aggregate endpoints, bulk pad job, extended progress, weak-items). 27/27 pytest cases pass (14 new in test_library_and_padjobs.py + 13 existing in test_gakushu_api.py).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/library/quiz?type=campuran", "issue": "Blends only book-1 sub-parts (each sub-call passes book/bab through) which is correct, but final `.questions[:limit]` after shuffle can drop kinds unevenly. Not a bug, but worth noting for UX consistency."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_library_and_padjobs.py",
+    "/app/backend/tests/test_gakushu_api.py",
+    "/app/test_reports/pytest/pytest_iter7.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py `_run_pad_all` in-memory PAD_JOBS dict is not cleaned up; long-running instances will leak. Add TTL or LRU cap (e.g., keep last 20 jobs).",
+    "PAD_JOBS is per-process only — with multiple workers/replicas the /api/admin/pad-jobs/{id} lookup can 404 on the wrong worker. Move to Mongo (e.g., pad_jobs collection) for durability.",
+    "library_quiz_attempt inserts with `chapter_number: 0` for aggregate attempts, but there is no unique index on (user_id, operation_id). The DuplicateKeyError branch will never trigger unless such an index exists — check indices; race can produce duplicate attempts and inflate weak-items counts.",
+    "library/weak-items pipeline is O(all attempts * lookups) and does one Mongo find_one per weak item. For a heavy user this is N+1. Batch by chapter or embed enough denorm to avoid re-lookup.",
+    "library_quiz(type='susun') derives `tokens` from `q['distractors']` and shuffles once; correct answer segments always appear in the pool but if a chapter's distractors don't contain the right tokens, the client can't reconstruct correct_order. Verify seed data.",
+    "extended progress `average_score` divides by max(len(attempts), 1) — returns 0 when no attempts, which is fine, but frontend should distinguish 0 (no attempts) vs 0 (all zero scores)."
+  ],
+  "updated_files": ["/app/backend/tests/test_library_and_padjobs.py"],
+  "success_rate": {"backend": "100%", "frontend": "not tested"},
+  "test_credentials": "Admin mpdigitech.id@gmail.com / Admin@2026 (from /app/memory/test_credentials.md).",
+  "seed_data_creation": "Ephemeral TEST_lib_* learner via /api/auth/register. One kanji library attempt submitted with 1 wrong / rest correct to populate weak-items. pad-all-quizzes job was triggered; verified job launches and status endpoint reports total/done/progress/finished. Test does not wait for full completion (LLM cost).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Two backend test files: test_gakushu_api.py (13 tests, chapters+auth+admin) and test_library_and_padjobs.py (14 tests, library aggregates, weak-items, pad-all job, extended progress, backward-compat). All 27 pass in ~17s. Frontend was intentionally skipped per request. REACT_APP_BACKEND_URL must be exported (not auto-loaded). pytest.ini enforces `-n 2 --dist loadscope`. pad-all-quizzes uses in-memory PAD_JOBS; each backend restart clears jobs.",
+  "rca of the issue": "N/A — no failing tests remaining. Initial /library/weak-items test asserted list shape but endpoint returns {total, cards}; test was updated to unwrap `cards` key."
+}
