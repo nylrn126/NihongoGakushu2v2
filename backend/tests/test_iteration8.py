@@ -202,12 +202,12 @@ def test_pad_jukugo_chapter_2(admin_session):
         f"jukugo counts too low: {counts}"
 
 
-# ---------- BabPicker: /api/chapters returns 49 with required fields ----------
+# ---------- BabPicker: /api/chapters returns 50 with required fields ----------
 def test_chapters_list_regression_for_babpicker():
     r = requests.get(f"{BASE_URL}/api/chapters", timeout=15)
     assert r.status_code == 200
     data = r.json()
-    assert len(data) == 49
+    assert len(data) == 50
     for ch in data:
         for f in ("number", "title", "title_translation", "book"):
             assert f in ch, f"missing {f} in {ch}"

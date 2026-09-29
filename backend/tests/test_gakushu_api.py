@@ -44,9 +44,9 @@ def test_public_chapters_list():
     r = requests.get(f"{BASE_URL}/api/chapters", timeout=15)
     assert r.status_code == 200
     data = r.json()
-    assert len(data) == 49, f"expected 49 published chapters, got {len(data)}"
+    assert len(data) == 50, f"expected 50 published chapters, got {len(data)}"
     numbers = sorted(c["number"] for c in data)
-    assert numbers[0] == 2 and numbers[-1] == 50
+    assert numbers[0] == 1 and numbers[-1] == 50
     for ch in data:
         assert "counts" in ch and "quiz_bunpo" in ch["counts"]
         assert "content" not in ch  # summary only
@@ -139,7 +139,7 @@ def test_admin_chapters_summary(admin_session):
     r = admin_session.get(f"{BASE_URL}/api/admin/chapters", timeout=15)
     assert r.status_code == 200
     data = r.json()
-    assert len(data) == 49
+    assert len(data) == 50
     assert all("counts" in c for c in data)
     assert all("content" not in c for c in data)
 

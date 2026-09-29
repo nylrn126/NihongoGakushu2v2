@@ -327,18 +327,70 @@ function QuizBunpoEditor({ items, onSave }) {
 
 function QuizSusunEditor({ items, onSave }) {
   const [draft, setDraft, dirty] = useDraft(items);
+  const update = (i, patch) => setDraft(draft.map((d, idx) => idx === i ? { ...d, ...patch } : d));
   const remove = (i) => setDraft(draft.filter((_, idx) => idx !== i));
+  const add = () => setDraft([...draft, {
+    id: `qs-new-${Date.now()}`,
+    translation: "",
+    hint: null,
+    correct_order: [{ text: "", reading: null }],
+    distractors: [],
+  }]);
+  const move = (i, dir) => {
+    if ((dir < 0 && i === 0) || (dir > 0 && i === draft.length - 1)) return;
+    const swap = draft.map((x) => x);
+    [swap[i], swap[i + dir]] = [swap[i + dir], swap[i]];
+    setDraft(swap);
+  };
   return (
-    <EditorFrame title="Quiz Susun" count={draft.length} onSave={() => onSave(draft)} dirty={dirty}>
-      <p className="muted small">Untuk editing detail soal susun kata, gunakan reset dari sumber. Di sini tersedia hapus per soal.</p>
+    <EditorFrame title="Quiz Susun" count={draft.length} onAdd={add} onSave={() => onSave(draft)} dirty={dirty}>
+      <p className="muted small">
+        Setiap soal berisi <b>translation</b> (kalimat Bahasa Indonesia yang akan ditampilkan ke learner),
+        urutan token <b>correct_order</b> (susunan Jepang yang benar), dan <b>distractors</b> (token pengganggu).
+        Klik potongan furigana untuk menambahkan bacaan di atas kanji.
+      </p>
       {draft.map((q, i) => (
-        <div className="editor-row inline" key={q.id || i} data-testid={`edit-quiz-susun-${i}`}>
-          <span className="muted">#{i + 1}</span>
-          <span>{q.translation}</span>
-          <span className="ja-title">{(q.correct_order || []).map((s) => s.text).join("")}</span>
-          <button className="tiny-btn danger" onClick={() => remove(i)}>Hapus</button>
+        <div className="editor-row susun-editor" key={q.id || i} data-testid={`edit-quiz-susun-${i}`}>
+          <div className="susun-editor-head">
+            <span className="muted">#{i + 1}</span>
+            <input
+              className="ef-input"
+              value={q.translation}
+              onChange={(e) => update(i, { translation: e.target.value })}
+              placeholder="Terjemahan Bahasa Indonesia (mis. 'Saya Mike.')"
+              data-testid={`susun-translation-${i}`}
+            />
+            <div className="susun-editor-actions">
+              <button className="tiny-btn" onClick={() => move(i, -1)} data-testid={`susun-up-${i}`} aria-label="Naik">↑</button>
+              <button className="tiny-btn" onClick={() => move(i, +1)} data-testid={`susun-down-${i}`} aria-label="Turun">↓</button>
+              <button className="tiny-btn danger" onClick={() => remove(i)} data-testid={`susun-remove-${i}`}>Hapus</button>
+            </div>
+          </div>
+          <div className="susun-editor-body">
+            <div>
+              <div className="content-label">URUTAN BENAR</div>
+              <FuriganaSegmentEditor
+                value={q.correct_order || []}
+                onChange={(v) => update(i, { correct_order: v })}
+                testid={`susun-correct-${i}`}
+              />
+            </div>
+            <div>
+              <div className="content-label">TOKEN PENGGANGGU (opsional)</div>
+              <FuriganaSegmentEditor
+                value={q.distractors || []}
+                onChange={(v) => update(i, { distractors: v })}
+                testid={`susun-distractors-${i}`}
+              />
+            </div>
+          </div>
         </div>
       ))}
+      {!draft.length && (
+        <div className="empty-state">
+          Belum ada soal susun. Klik <b>+ Tambah</b> di atas untuk membuat soal pertama.
+        </div>
+      )}
     </EditorFrame>
   );
 }
