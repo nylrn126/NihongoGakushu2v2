@@ -1,0 +1,20 @@
+{
+  "summary": "Regression testing covered public lessons, registration/session refresh/logout, admin login, reset/change-password, quiz/progress, mobile layout, manifest, and active service worker. Most flows pass; brute-force lockout is not effective through the public endpoint.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/auth/login", "issue": "After five sequential invalid-password responses (401) for the same test email, a subsequent valid login returns 200 instead of temporary 429 lockout. Backend logs show requests arriving from changing client IPs, while lockout key includes request.client.host, so the required public IP/email pair is not consistently tracked.", "priority": "HIGH"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_gakushu_api.py", "/app/backend/tests/test_auth_hardening.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": ["Make login-attempt identity stable behind the proxy (use trusted forwarded client IP handling or email/IP normalization) and verify five-failure lockout on the public URL."],
+  "critical_code_review_comments": ["Lockout currently relies directly on request.client.host; public proxy requests are observed from different 10.219.x.x client addresses, allowing the same email to bypass the intended IP/email counter."],
+  "updated_files": ["/app/backend/tests/test_auth_hardening.py", "/app/test_reports/pytest/pytest_results.xml", "/app/test_reports/iteration_4.json"],
+  "success_rate": {"backend": "80%", "frontend": "100%"},
+  "seed_data_creation": "Created uniquely named temporary learner accounts for lockout and reset tests; no seeded data modified.",
+  "retest_needed": true,
+  "should_call_test_agent_after_fix": true,
+  "context_for_next_testing_agent": "Core API regression (lessons, registration, refresh rotation, quiz idempotency, progress, reset/change password) passed. Admin credentials passed. Mobile home/lesson navigation and navigator.serviceWorker.controller passed. Lockout remains unresolved on public ingress.",
+  "rca of the issue": "server.py builds identifier as request.client.host plus lowercased email. Logs show the public ingress forwards requests with varying internal client hosts, so failures are split across login_attempts records. Use a stable trusted proxy header or define the intended identity semantics explicitly before counting attempts. No APIs were mocked."
+}

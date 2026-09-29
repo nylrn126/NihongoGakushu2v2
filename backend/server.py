@@ -143,7 +143,9 @@ async def register(data: Credentials, response: Response):
 
 @api.post("/auth/login")
 async def login(data: Credentials, response: Response, request: Request):
-    identifier = f"{request.client.host if request.client else 'unknown'}:{data.email.lower()}"
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    client_ip = forwarded_for.split(",")[0].strip() if forwarded_for else (request.client.host if request.client else "unknown")
+    identifier = f"{client_ip}:{data.email.lower()}"
     now = datetime.now(timezone.utc)
     attempt = await db.login_attempts.find_one({"identifier": identifier}, {"_id": 0})
     if attempt and attempt.get("locked_until") and datetime.fromisoformat(attempt["locked_until"]) > now:
